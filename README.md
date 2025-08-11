@@ -1,161 +1,207 @@
-# Puzzle Agent
+## Puzzle Workshop: Building Practical Agents with LangChain and MCP
 
-## Overview
-Puzzle Agent is a multi-agent system designed to perform a series of tasks including calculating string lengths, retrieving birthdays, fetching questions from a CSV file, generating answers, and sending messages to a Slack channel. The system is built using LangChain and integrates with various tools to achieve its functionality.
+This hands-on guide walks you through the Puzzle Agent project and uses it to teach core concepts:
+- LangChain tools and agent basics
+- Composing agents from tools
+- Sub-agents (an agent as a tool)
+- RAG with Pinecone + OpenAI embeddings
+- Web UI for agent interaction
 
-## Features
-- **String Length Calculation:** Calculate the length of a given string.
-- **Birthday Retrieval:** Retrieve the day of the month for a given person's birthday.
-- **CSV Reading:** Use calculated indices to fetch a question from a CSV file.
-- **Answer Generation:** Generate an answer based on the fetched question.
-- **Slack Integration:** Send messages to a specified Slack channel.
+By the end, you’ll know how to extend Puzzle Agent with your own tools and agents.
 
-## Setup Instructions
-1. **Clone the Repository:**
-   ```bash
-   git clone <repository-url>
-   cd puzzle-agent
-   ```
+---
 
-2. **Install Dependencies:**
-   Ensure you have Python installed, then run:
-   ```bash
-   pipenv install
-   ```
+## 1) Project Tour
 
-3. **Set Environment Variables:**
-   Create a `.env` file in the root directory and add the following (we’ll provide some of them):
-   ```
-   # OpenAI
-   OPENAI_API_KEY=<your-openai-api-key>
-
-   # Tavily Search (sign up to get an API key)
-   # Dashboard: https://app.tavily.com/home
-   TAVILY_API_KEY=<your-tavily-api-key>
-
-   # Pinecone (vector DB for RAG)
-   # Console: https://www.pinecone.io/  → create an index and API key
-   PINECONE_API_KEY=<your-pinecone-api-key>
-   INDEX_NAME=<your-index-name>
-
-   # Slack bot token (we will provide this; used to send to #rest-ai-workshop)
-   SLACK_BOT_TOKEN=<your-slack-bot-token>
-
-   # LangSmith tracing
-   LANGSMITH_TRACING=true
-   LANGSMITH_ENDPOINT=https://api.smith.langchain.com
-   LANGSMITH_API_KEY=<your-langsmith-api-key>
-   ```
-
-4. **Run the Application:**
-   ```bash
-   python3 main.py
-   ```
-
-You can run
-```bash
-python3 app.py
-``` if you want to see the result in UI.
-
-5. The input should be pasted from below:
-```
-Hey Puzzle Agent, please solve this puzzle end to end:
-
-1. Calculate the length of "Hello AI".
-2. Find the numeric day of the month on which David Ben-Gurion was born.
-3. Use these values as the row (length) and column (birthday) to fetch the question from the CSV.
-4. Answer the question using the Bible data (via Tavily).
-5. Send the final answer to the designated Slack channel.
-
-```
-
-## Usage
-- **Interactive Mode:**
-  - Start the application and interact with the agents by providing inputs such as strings for length calculation or names for birthday retrieval.
-  - The agents will autonomously decide when to use the Slack tool to send messages based on the context of the conversation.
-
-
-## 🏗️ Project Structure
+Key directories and files:
 
 ```
 puzzle-agent/
-├── agents/
-│   ├── first_agent.py           # First agent: length + birthday → CSV question
-│   └── second_agent.py          # Second agent: CSV/question → Tavily answer → Slack
-├── data/
-│   ├── bible_bresheit.txt       # RAG source text
-│   └── questionList.csv         # Questions grid (row=length, col=birthday day)
+├── main.py                  # CLI orchestrator (REPL)
+├── app.py                   # Flask web app (chat UI)
+├── templates/index.html     # Web UI (chat, confetti)
 ├── tools/
-│   ├── answer_tool.py           # Tavily-based answering tool
-│   ├── birthday_tool.py         # Returns numeric day-of-month via LLM
-│   ├── csv_reader.py            # Returns question from CSV by row,col
-│   ├── length_string.py         # Returns length of a string
-│   ├── slack_tool.py            # Sends a message to Slack
-│   └── rag/
-│       └── rag_tool.py          # Pinecone ingestion for RAG
-├── utils/
-│   └── openai_config.py         # Centralized LLM config
-├── templates/
-│   └── index.html               # Web UI for chat
-├── app.py                       # Flask app for chat UI
-├── main.py                      # CLI runner (REPL)
-├── README.md
-├── Pipfile / Pipfile.lock
-└── .env                         # Environment variables (not committed)
+│   ├── rag/rag_tool.py      # Pinecone ingestion (RAG)
+│   ├── answer_tool.py       # Web search (Tavily)
+│   ├── csv_reader.py        # CSV question fetch by row,col
+│   ├── length_string.py     # String length tool
+│   ├── birthday_tool.py     # Birthday day-of-month tool
+│   └── slack_tool.py        # Slack messages
+└── agents/
+    ├── first_agent.py       # Agent 1 (length + birthday → CSV question)
+    └── second_agent.py      # Agent 2 (question/row,col → answer via Tavily → Slack)
 ```
 
-## 🔧 Tools (detailed)
+### Flow
 
-- LengthOfString (`tools/length_string.py`)
-  - Purpose: Return the character length of a string using Python `len()`.
-  - Signature: `length_of_string_tool_func(text: str) -> int`
-  - Input: Plain text string.
-  - Output: Integer (number of characters).
-  - Notes: Exposed to agents as `LengthOfString`.
+- The puzzle uses two sub-questions to compute indices:
+  1. Compute the length of a provided text (row).
+  2. Extract the numeric day-of-month from a birthday (col).
+- Use `(row, col)` to fetch a question from `data/questionList.csv`.
+- Search for the answer with Tavily.
+- Post the final answer to Slack.
 
-- BirthdayTool (`tools/birthday_tool.py`)
-  - Purpose: Return the numeric day-of-month for a person's birthday via LLM.
-  - Signature: `get_birthday(person: str = "David Ben Gurion") -> int`
-  - Input: Person's full name (string).
-  - Output: Integer in range 1–31.
-  - Robustness: Enforces digits-only in prompt and applies regex fallback (extracts 1–2 digit number from responses like “born on the 16th”). Validates range.
-  - Env: Uses `OPENAI_API_KEY` via `utils/openai_config.py`.
-  - Exposed as `BirthdayTool`.
+---
 
-- CSVReader (`tools/csv_reader.py`)
-  - Purpose: Fetch a question from a CSV, indexed by row and column.
-  - Signature: `get_question_from_csv(row_col: str) -> str`
-  - Input: String in the form `"<row>,<col>"` (both zero-based integers).
-  - Output: Question text (string) or friendly error message if out of range.
-  - Data: Reads `data/questionList.csv`.
-  - Exposed as `CSVReader`.
+## 2) LangChain Tools
 
-- AnswerFromCSVTool (`tools/answer_tool.py`)
-  - Purpose: Generate an answer to a question using Tavily search (RAG-lite).
-  - Signature: `search_answer_from_csv(query: str) -> str`
-  - Input: The question string.
-  - Output: Answer text from Tavily (`include_generated_answer=True`).
-  - Env: `TAVILY_API_KEY`. Sign up and manage your key in the Tavily dashboard: [Tavily](https://app.tavily.com/home)
-  - Exposed as `AnswerFromCSVTool`.
+A LangChain tool is a function (often decorated with `@tool`) that returns user-facing text.
 
-- SlackTool (`tools/slack_tool.py`)
-  - Purpose: Send a message to a Slack channel.
-  - Signature: `send_to_slack_channel(message: str) -> None`
-  - Input: Message text (string).
-  - Output: None (posts to Slack; prints status/errors).
-  - Env: `SLACK_BOT_TOKEN`, channel ID configured in the module.
-  - Exposed as `SlackTool`.
+Example: `tools/length_string.py`
+```python
+from langchain_core.tools import tool
 
-- RAG Ingestion (`tools/rag/rag_tool.py`)
-  - Purpose: Ingest and index `data/bible_bresheit.txt` into Pinecone for retrieval.
-  - Signature: `ingest_bible(file_path: str) -> PineconeVectorStore`
-  - Input: Path to text file.
-  - Output: Pinecone vector store handle (returned). Side-effect: populates index.
-  - Env: `OPENAI_API_KEY` (embeddings), `PINECONE_API_KEY`, `INDEX_NAME`. Create your index and get your API key in the Pinecone console: [Pinecone](https://www.pinecone.io/)
-  - Usage: Run once at startup (not an agent tool by default).
+@tool
+def length_of_string_tool_func(text: str) -> int:
+    return len(text)
+```
 
-## Contributing
-Contributions are welcome! Please fork the repository and submit a pull request for any improvements or bug fixes.
+Design tips:
+- Tools should be deterministic and concise.
+- Keep side effects explicit in return text.
 
-## License
-This project is licensed under the MIT License.
+---
+
+## 3) Building Agents
+
+Agents choose which tools to call. We configure each agent with a system prompt, a tool list, and an LLM.
+
+```python
+from langchain.prompts import ChatPromptTemplate
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_openai import ChatOpenAI
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", system_prompt),
+    ("human", "{input}"),
+    ("placeholder", "{agent_scratchpad}")
+])
+
+agent = create_tool_calling_agent(llm, tools, prompt)
+executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True)
+```
+
+The first agent computes string length + birthday day-of-month, then fetches the CSV question. The second agent answers (via Tavily) and posts to Slack.
+
+---
+
+## 4) Sub-Agents (Agent-as-a-Tool)
+
+You can wrap Agent 2 as a Tool and let Agent 1 call it directly. This encapsulates RAG+Slack behavior behind a single tool, keeping Agent 1 simple and extensible.
+
+---
+
+## 5) RAG / Bible Search (Vector Retrieval)
+
+`tools/rag/rag_tool.py` ingests `data/bible_bresheit.txt` into Pinecone using OpenAI embeddings. Run ingestion once at startup.
+
+Key notes:
+- Embeddings: `OpenAIEmbeddings`
+- Vector store: `PineconeVectorStore`
+- Env: `OPENAI_API_KEY`, `PINECONE_API_KEY`, `INDEX_NAME`
+- Create your index and API key here: [Pinecone](https://www.pinecone.io/)
+
+---
+
+## 6) Web Search (Tavily)
+
+`tools/answer_tool.py` queries Tavily with `include_generated_answer=True` and returns the answer text.
+
+- Sign up / dashboard: [Tavily](https://app.tavily.com/home)
+- Env: `TAVILY_API_KEY`
+
+---
+
+## 7) Slack Integration
+
+`tools/slack_tool.py` posts messages to Slack using `SLACK_BOT_TOKEN`. In this workshop, we’ll provide the token so you can send messages to `#rest-ai-workshop`.
+
+---
+
+## 8) Web UI
+
+Run `python app.py`, then open `http://localhost:5000`. The chat page shows both agents’ outputs and triggers confetti on final answers.
+
+---
+
+## 9) Setup & Run
+
+1) Install deps
+```bash
+pipenv install
+```
+
+2) Create `.env` and set:
+```bash
+OPENAI_API_KEY=...
+TAVILY_API_KEY=...
+PINECONE_API_KEY=...
+INDEX_NAME=...
+SLACK_BOT_TOKEN=...
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=...
+```
+
+3) Start REPL (CLI)
+```bash
+python main.py
+```
+
+4) Start Web UI
+```bash
+python app.py
+```
+
+Try:
+```
+Hey puzzle agent, please solve this end-to-end:
+1) Calculate the length of 'Hello AI'.
+2) Get the numeric day-of-month David Ben Gurion was born.
+3) Use row=<length> and column=<day> to fetch the question from the CSV.
+4) Answer the question using the Bible data (via Tavily).
+5) Send the final answer to the Slack channel.
+```
+
+---
+
+## 10) CSV Question Lookup (row, col)
+
+The project reads questions from `data/questionList.csv` using the `CSVReader` tool in `tools/csv_reader.py`.
+
+- **Input format**: a single string `"row,col"` (e.g., `"8,16"`).
+- **Indexing**: both row and column are zero-based.
+  - **Row 0** is the first data row; **Column 0** is the first column.
+  - If you prefer 1-based indices, subtract 1 before calling the tool.
+- **Behavior**:
+  - Returns the cell at the given row and column.
+  - Returns `"Column index out of range"` if the column is beyond that row's length.
+  - Returns `"Row not found or empty"` if the row doesn't exist or is empty.
+- **Data source**: `data/questionList.csv`.
+
+Example (direct call):
+
+```python
+from tools.csv_reader import get_question_from_csv
+
+# Fetch the question at row=8, col=16 (zero-based)
+question = get_question_from_csv("8,16")
+print(question)
+```
+
+In the end-to-end flow, the first agent computes:
+- **row**: the length of the provided string
+- **col**: the numeric day-of-month from the birthday tool
+
+It then fetches the CSV question at `(row, col)` and passes it to the second agent to answer.
+
+---
+
+## 11) Further Reading
+
+- LangChain docs: https://python.langchain.com/
+- Tavily search: [https://app.tavily.com/home](https://app.tavily.com/home)
+- Pinecone vectors: https://docs.pinecone.io/
+- LangSmith: https://smith.langchain.com/
+
+Happy hacking! 🚀
