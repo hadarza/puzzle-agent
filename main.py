@@ -17,8 +17,6 @@ def main():
     print("• Birthday retrieval")
     print("\n" + "=" * 50)
 
-    ingest_bible("data/bible_bresheit.txt")
-
     print("\n✅ Second agent:")
     print("\nAvailable capabilities:")
     print("• RAG search and answer generation")

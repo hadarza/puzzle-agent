@@ -12,7 +12,7 @@ def send_to_slack_channel(message: str) -> None:
     try:
         print(f"Sending message to Slack channel: {message}")
         response = slack_client.chat_postMessage(
-            channel="C08PYJ7F4Q1",
+            channel="C099ZL7L9EG",
             text=message
         )
         print(f"Message sent to Slack channel: {response['channel']}")
